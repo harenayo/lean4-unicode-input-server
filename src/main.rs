@@ -2,7 +2,7 @@ use {
     lsp_server::{
         Connection,
         Message,
-        ProtocolError,
+        Response,
     },
     serde_json::json,
     std::error::Error,
@@ -15,9 +15,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     Result::Ok(())
 }
 
-fn run(connection: Connection) -> Result<(), ProtocolError> {
+fn run(connection: Connection) -> Result<(), Box<dyn Error>> {
     connection.initialize(json!({
-        "capabilities": {},
+        "capabilities": {
+            "completionProvider": {
+                "triggerCharacters": "\\",
+            },
+        },
         "serverInfo": {
             "name": env!("CARGO_PKG_NAME"),
             "version": env!("CARGO_PKG_VERSION"),
@@ -28,6 +32,16 @@ fn run(connection: Connection) -> Result<(), ProtocolError> {
         if let Message::Request(request) = message {
             if connection.handle_shutdown(&request)? {
                 break;
+            }
+
+            if request.method == "textDocument/completion" {
+                connection.sender.send(Message::Response(Response {
+                    id: request.id,
+                    result: Option::Some(json!([{
+                        "label": "DUMMY",
+                    }])),
+                    error: Option::None,
+                }))?;
             }
         }
     }
