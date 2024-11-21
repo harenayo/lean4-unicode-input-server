@@ -12,9 +12,13 @@ use {
     },
     serde_json::{
         from_str,
+        from_value,
         to_value,
     },
-    std::collections::HashMap,
+    std::{
+        collections::HashMap,
+        convert::identity,
+    },
 };
 
 fn main() {
@@ -38,24 +42,24 @@ fn main() {
         )
         .unwrap();
 
-    let completion = to_value(
+    let mut completion: Vec<_> =
         from_str::<Abbreviations>(include_str!(env!("ABBREVIATIONS_JSON")))
             .unwrap()
             .into_iter()
             .map(|(label, text)| CompletionItem {
                 label: format!("\\{label}"),
                 kind: CompletionItemKind::Snippet,
-                insert_text: match text.contains("$CURSOR") {
-                    true => text.replace("$CURSOR", "$0"),
-                    false => text,
-                },
                 insert_text_format: InsertTextFormat::Snippet,
                 insert_text_mode: InsertTextMode::AdjustIndentation,
-                commit_characters: [" ", "\n"],
+                text_edit: TextEdit {
+                    range: Range::default(),
+                    new_text: match text.contains("$CURSOR") {
+                        true => text.replace("$CURSOR", "$0"),
+                        false => text,
+                    },
+                },
             })
-            .collect::<Vec<_>>(),
-    )
-    .unwrap();
+            .collect();
 
     for message in &connection.receiver {
         if let Message::Request(request) = message {
@@ -64,7 +68,38 @@ fn main() {
             }
 
             let (result, error) = match match request.method.as_str() {
-                "textDocument/completion" => Result::Ok(completion.clone()),
+                "textDocument/completion" => (|| {
+                    let params = from_value::<CompletionParams>(request.params)?;
+
+                    match match params.context.trigger_kind {
+                        CompletionTriggerKind::Invoked => true,
+                        CompletionTriggerKind::TriggerCharacter => {
+                            params.context.trigger_character == "\\"
+                        },
+                        CompletionTriggerKind::TriggerForIncompleteCompletions => false,
+                    } {
+                        true => {
+                            let mut range = Range {
+                                start: params.position,
+                                end: params.position,
+                            };
+
+                            range.start.character -= 1;
+
+                            for item in &mut completion {
+                                item.text_edit.range = range;
+                            }
+
+                            to_value(&completion)
+                        },
+                        false => to_value(identity::<[CompletionItem; 0]>([])),
+                    }
+                })()
+                .map_err(|_| ResponseError {
+                    code: ErrorCode::InvalidParams as i32,
+                    message: "parameters are invalid".to_owned(),
+                    data: Option::None,
+                }),
                 _ => Result::Err(ResponseError {
                     code: ErrorCode::MethodNotFound as i32,
                     message: "a method is not found".to_owned(),
@@ -95,6 +130,19 @@ struct Position {
     character: u32,
 }
 
+#[derive(Clone, Copy, Default, Serialize)]
+struct Range {
+    start: Position,
+    end: Position,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextEdit {
+    range: Range,
+    new_text: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InitializeResult {
@@ -118,6 +166,42 @@ struct ServerInfo {
 #[serde(rename_all = "camelCase")]
 struct CompletionOptions {
     trigger_characters: [&'static str; 1],
+}
+
+#[derive(Deserialize)]
+struct CompletionParams {
+    position: Position,
+    context: CompletionContext,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(try_from = "u32")]
+enum CompletionTriggerKind {
+    Invoked = 1,
+    TriggerCharacter = 2,
+    TriggerForIncompleteCompletions = 3,
+}
+
+impl TryFrom<u32> for CompletionTriggerKind {
+    type Error = String;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            _ if value == Self::Invoked as u32 => Result::Ok(Self::Invoked),
+            _ if value == Self::TriggerCharacter as u32 => Result::Ok(Self::TriggerCharacter),
+            _ if value == Self::TriggerForIncompleteCompletions as u32 => {
+                Result::Ok(Self::TriggerForIncompleteCompletions)
+            },
+            _ => Result::Err(format!("{value} is not CompletionTriggerKind")),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionContext {
+    trigger_kind: CompletionTriggerKind,
+    trigger_character: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -149,10 +233,9 @@ impl From<InsertTextMode> for u32 {
 struct CompletionItem {
     label: String,
     kind: CompletionItemKind,
-    insert_text: String,
     insert_text_format: InsertTextFormat,
     insert_text_mode: InsertTextMode,
-    commit_characters: [&'static str; 2],
+    text_edit: TextEdit,
 }
 
 #[derive(Clone, Serialize)]
