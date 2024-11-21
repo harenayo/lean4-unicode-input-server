@@ -1,53 +1,158 @@
 use {
     lsp_server::{
         Connection,
+        ErrorCode,
         Message,
         Response,
+        ResponseError,
     },
     serde_json::json,
-    std::error::Error,
+    std::collections::HashMap,
 };
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() {
     let (connection, threads) = Connection::stdio();
-    run(connection)?;
-    threads.join()?;
-    Result::Ok(())
-}
 
-fn run(connection: Connection) -> Result<(), Box<dyn Error>> {
-    connection.initialize_finish(
-        connection.initialize_start()?.0,
-        json!({
-            "capabilities": {
-                "completionProvider": {
-                    "triggerCharacters": ["\\"],
+    connection
+        .initialize_finish(
+            connection.initialize_start().unwrap().0,
+            json!({
+                "capabilities": {
+                    "positionEncoding": "utf-8",
+                    "textDocumentSync": 1,
+                    "completionProvider": {
+                        "triggerCharacters": ["\\"],
+                    },
                 },
-            },
-            "serverInfo": {
-                "name": env!("CARGO_PKG_NAME"),
-                "version": env!("CARGO_PKG_VERSION"),
-            },
-        }),
-    )?;
+                "serverInfo": {
+                    "name": env!("CARGO_PKG_NAME"),
+                    "version": env!("CARGO_PKG_VERSION"),
+                },
+            }),
+        )
+        .unwrap();
+
+    let mut files: HashMap<_, Vec<String>> = HashMap::new();
 
     for message in &connection.receiver {
-        if let Message::Request(request) = message {
-            if connection.handle_shutdown(&request)? {
-                break;
-            }
+        match message {
+            Message::Request(request) => {
+                if connection.handle_shutdown(&request).unwrap() {
+                    break;
+                }
 
-            if request.method == "textDocument/completion" {
-                connection.sender.send(Message::Response(Response {
-                    id: request.id,
-                    result: Option::Some(json!([{
-                        "label": "DUMMY",
-                    }])),
-                    error: Option::None,
-                }))?;
-            }
+                let (result, error) = match match request.method.as_str() {
+                    "textDocument/completion" => match (|| {
+                        let params = request.params.as_object()?;
+                        let position = params.get("position")?.as_object()?;
+
+                        Option::Some((
+                            params
+                                .get("textDocument")?
+                                .as_object()?
+                                .get("uri")?
+                                .as_str()?,
+                            position.get("line")?.as_u64()?,
+                            position.get("character")?.as_u64()?,
+                        ))
+                    })() {
+                        Option::Some((uri, line, character)) => {
+                            let str = &files[uri][line as usize][character as usize..];
+
+                            Result::Ok(json!([{
+                                "label": str,
+                            }]))
+                        },
+                        Option::None => Result::Err(ResponseError {
+                            code: ErrorCode::InvalidParams as i32,
+                            message: "parameters are invalid".to_owned(),
+                            data: Option::None,
+                        }),
+                    },
+                    _ => Result::Err(ResponseError {
+                        code: ErrorCode::MethodNotFound as i32,
+                        message: "a method is not found".to_owned(),
+                        data: Option::None,
+                    }),
+                } {
+                    Result::Ok(result) => (Option::Some(result), Option::None),
+                    Result::Err(error) => (Option::None, Option::Some(error)),
+                };
+
+                connection
+                    .sender
+                    .send(Message::Response(Response {
+                        id: request.id,
+                        result,
+                        error,
+                    }))
+                    .unwrap();
+            },
+            Message::Notification(notification) => (|| {
+                let (uri, text) = match notification.method.as_str() {
+                    "textDocument/didOpen" => {
+                        let document = notification
+                            .params
+                            .as_object()?
+                            .get("textDocument")?
+                            .as_object()?;
+
+                        Option::Some((
+                            document.get("uri")?.as_str()?,
+                            Option::Some(document.get("text")?.as_str()?),
+                        ))
+                    },
+                    "textDocument/didChange" => {
+                        let params = notification.params.as_object()?;
+
+                        Option::Some((
+                            params
+                                .get("textDocument")?
+                                .as_object()?
+                                .get("uri")?
+                                .as_str()?,
+                            Option::Some(
+                                params
+                                    .get("contentChanges")?
+                                    .as_array()?
+                                    .last()?
+                                    .as_object()?
+                                    .get("text")?
+                                    .as_str()?,
+                            ),
+                        ))
+                    },
+                    "textDocument/didClose" => Option::Some((
+                        notification
+                            .params
+                            .as_object()?
+                            .get("textDocument")?
+                            .as_object()?
+                            .get("uri")?
+                            .as_str()?,
+                        Option::None,
+                    )),
+                    _ => Option::None,
+                }?;
+
+                match text {
+                    Option::Some(text) => {
+                        files.insert(
+                            uri.to_owned(),
+                            text.lines().map(str::to_owned).collect::<Vec<_>>(),
+                        );
+                    },
+                    Option::None => {
+                        files.remove(uri);
+                    },
+                }
+
+                Option::None
+            })()
+            .unwrap_or_default(),
+            _ => (),
         }
     }
 
-    Result::Ok(())
+    threads.join().unwrap();
 }
