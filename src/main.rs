@@ -57,11 +57,51 @@ fn main() {
                         ))
                     })() {
                         Option::Some((uri, line, character)) => {
-                            let str = &files[uri][line as usize][character as usize..];
+                            let _str = &files[uri][line as usize][character as usize..];
 
-                            Result::Ok(json!([{
-                                "label": str,
-                            }]))
+                            Result::Ok(json!([
+                                {
+                                    "label": "{}",
+                                    "insertText": "{$0}",
+                                    "insertTextFormat": 2,
+                                    "insertTextMode": 2,
+                                },
+                                {
+                                    "label": "{}_",
+                                    "insertText": "{$0}_",
+                                    "insertTextFormat": 2,
+                                    "insertTextMode": 1,
+                                },
+                                {
+                                    "label": "{{}}",
+                                    "insertText": "⦃$1⦄",
+                                    "insertTextFormat": 2,
+                                    "insertTextMode": 2,
+                                },
+                                {
+                                    "label": "\\",
+                                    "insertText": "\\",
+                                    "insertTextFormat": 1,
+                                },
+                                {
+                                    "label": "a",
+                                    "kind": 1,
+                                    "insertText": "α",
+                                    "insertTextFormat": 1,
+                                },
+                                {
+                                    "label": "b",
+                                    "kind": 6,
+                                    "insertText": "β",
+                                    "insertTextFormat": 1,
+                                },
+                                {
+                                    "label": "c",
+                                    "kind": 15,
+                                    "insertText": "χ",
+                                    "insertTextFormat": 1,
+                                },
+                            ]))
                         },
                         Option::None => Result::Err(ResponseError {
                             code: ErrorCode::InvalidParams as i32,
