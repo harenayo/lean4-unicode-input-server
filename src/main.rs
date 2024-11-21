@@ -12,7 +12,6 @@ use {
     },
     serde_json::{
         from_str,
-        from_value,
         to_value,
     },
     std::collections::HashMap,
@@ -39,24 +38,24 @@ fn main() {
         )
         .unwrap();
 
-    let mut completion: Vec<_> =
+    let completion = to_value(
         from_str::<Abbreviations>(include_str!(env!("ABBREVIATIONS_JSON")))
             .unwrap()
             .into_iter()
             .map(|(label, text)| CompletionItem {
                 label: format!("\\{label}"),
                 kind: CompletionItemKind::Snippet,
+                insert_text: match text.contains("$CURSOR") {
+                    true => text.replace("$CURSOR", "$0"),
+                    false => text,
+                },
                 insert_text_format: InsertTextFormat::Snippet,
                 insert_text_mode: InsertTextMode::AdjustIndentation,
-                text_edit: TextEdit {
-                    range: Range::default(),
-                    new_text: match text.contains("$CURSOR") {
-                        true => text.replace("$CURSOR", "$0"),
-                        false => text,
-                    },
-                },
+                commit_characters: [" ", "\n"],
             })
-            .collect();
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
 
     for message in &connection.receiver {
         if let Message::Request(request) = message {
@@ -65,27 +64,7 @@ fn main() {
             }
 
             let (result, error) = match match request.method.as_str() {
-                "textDocument/completion" => (|| {
-                    let params = from_value::<CompletionParams>(request.params)?;
-
-                    let mut range = Range {
-                        start: params.position,
-                        end: params.position,
-                    };
-
-                    range.start.character -= 1;
-
-                    for item in &mut completion {
-                        item.text_edit.range = range;
-                    }
-
-                    to_value(&completion)
-                })()
-                .map_err(|_| ResponseError {
-                    code: ErrorCode::InvalidParams as i32,
-                    message: "parameters are invalid".to_owned(),
-                    data: Option::None,
-                }),
+                "textDocument/completion" => Result::Ok(completion.clone()),
                 _ => Result::Err(ResponseError {
                     code: ErrorCode::MethodNotFound as i32,
                     message: "a method is not found".to_owned(),
@@ -116,19 +95,6 @@ struct Position {
     character: u32,
 }
 
-#[derive(Clone, Copy, Default, Serialize)]
-struct Range {
-    start: Position,
-    end: Position,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TextEdit {
-    range: Range,
-    new_text: String,
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InitializeResult {
@@ -152,12 +118,6 @@ struct ServerInfo {
 #[serde(rename_all = "camelCase")]
 struct CompletionOptions {
     trigger_characters: [&'static str; 1],
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CompletionParams {
-    position: Position,
 }
 
 #[derive(Clone, Serialize)]
@@ -189,9 +149,10 @@ impl From<InsertTextMode> for u32 {
 struct CompletionItem {
     label: String,
     kind: CompletionItemKind,
+    insert_text: String,
     insert_text_format: InsertTextFormat,
     insert_text_mode: InsertTextMode,
-    text_edit: TextEdit,
+    commit_characters: [&'static str; 2],
 }
 
 #[derive(Clone, Serialize)]
