@@ -16,17 +16,20 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn run(connection: Connection) -> Result<(), Box<dyn Error>> {
-    connection.initialize(json!({
-        "capabilities": {
-            "completionProvider": {
-                "triggerCharacters": "\\",
+    connection.initialize_finish(
+        connection.initialize_start()?.0,
+        json!({
+            "capabilities": {
+                "completionProvider": {
+                    "triggerCharacters": "\\",
+                },
             },
-        },
-        "serverInfo": {
-            "name": env!("CARGO_PKG_NAME"),
-            "version": env!("CARGO_PKG_VERSION"),
-        },
-    }))?;
+            "serverInfo": {
+                "name": env!("CARGO_PKG_NAME"),
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+        }),
+    )?;
 
     for message in &connection.receiver {
         if let Message::Request(request) = message {
