@@ -21,7 +21,7 @@ fn run(connection: Connection) -> Result<(), Box<dyn Error>> {
         json!({
             "capabilities": {
                 "completionProvider": {
-                    "triggerCharacters": "\\",
+                    "triggerCharacters": ["\\"],
                 },
             },
             "serverInfo": {
