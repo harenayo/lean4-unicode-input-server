@@ -1,4 +1,5 @@
 use {
+    indexmap::map::IndexMap,
     lsp_server::{
         Connection,
         ErrorCode,
@@ -11,14 +12,13 @@ use {
         Serialize,
     },
     serde_json::{
-        from_str,
-        from_value,
-        to_value,
+        de::from_str,
+        value::{
+            from_value,
+            to_value,
+        },
     },
-    std::{
-        collections::HashMap,
-        convert::identity,
-    },
+    std::convert::identity,
 };
 
 fn main() {
@@ -250,4 +250,4 @@ impl From<CompletionItemKind> for u32 {
     }
 }
 
-type Abbreviations = HashMap<String, String>;
+type Abbreviations = IndexMap<String, String>;
