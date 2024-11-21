@@ -1,7 +1,12 @@
 [package]
 name = "lean4-unicode-input-server"
 version = "0.0.0"
+authors = ["Harenayo"]
 edition = "2021"
+description = "A language server providing completion of Lean 4's unicode symbols"
+readme = "README.md"
+repository = "https://github.com/harenayo/lean4-unicode-input-server"
+license = "MIT"
 
 [dependencies]
 indexmap = { version = "2.6.0", features = ["serde"] }
