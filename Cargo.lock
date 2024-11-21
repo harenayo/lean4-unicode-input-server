@@ -28,6 +28,7 @@ name = "lean4-unicode-input-server"
 version = "0.0.0"
 dependencies = [
  "lsp-server",
+ "serde",
  "serde_json",
 ]
 
