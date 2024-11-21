@@ -15,10 +15,7 @@ use {
         from_value,
         to_value,
     },
-    std::{
-        borrow::Cow,
-        collections::HashMap,
-    },
+    std::collections::HashMap,
 };
 
 fn main() {
@@ -56,8 +53,8 @@ fn main() {
                 label,
                 kind: CompletionItemKind::Snippet,
                 text_edit_text: match text.contains("$CURSOR") {
-                    true => Cow::Owned(text.replace("$CURSOR", "$0")),
-                    false => Cow::Borrowed(text),
+                    true => text.replace("$CURSOR", "$0"),
+                    false => text,
                 },
             })
             .collect(),
@@ -197,9 +194,9 @@ impl From<InsertTextMode> for u32 {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CompletionItem {
-    label: &'static str,
+    label: String,
     kind: CompletionItemKind,
-    text_edit_text: Cow<'static, str>,
+    text_edit_text: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -214,4 +211,4 @@ impl From<CompletionItemKind> for u32 {
     }
 }
 
-type Abbreviations = HashMap<&'static str, &'static str>;
+type Abbreviations = HashMap<String, String>;
