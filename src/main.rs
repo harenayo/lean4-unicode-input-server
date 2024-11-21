@@ -71,13 +71,9 @@ fn main() {
                 "textDocument/completion" => (|| {
                     let params = from_value::<CompletionParams>(request.params)?;
 
-                    match match params.context.trigger_kind {
-                        CompletionTriggerKind::Invoked => true,
-                        CompletionTriggerKind::TriggerCharacter => {
-                            params.context.trigger_character == "\\"
-                        },
-                        CompletionTriggerKind::TriggerForIncompleteCompletions => false,
-                    } {
+                    match (params.context.trigger_kind != CompletionTriggerKind::TriggerCharacter)
+                        || (params.context.trigger_character == "\\")
+                    {
                         true => {
                             let mut range = Range {
                                 start: params.position,
@@ -174,7 +170,7 @@ struct CompletionParams {
     context: CompletionContext,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "u32")]
 enum CompletionTriggerKind {
     Invoked = 1,
