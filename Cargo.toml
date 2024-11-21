@@ -1,6 +1,6 @@
 [package]
 name = "lean4-unicode-input-server"
-version = "0.0.0"
+version = "0.1.0"
 authors = ["Harenayo"]
 edition = "2021"
 description = "A language server providing completion of Lean 4's unicode symbols"
