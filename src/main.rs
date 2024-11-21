@@ -62,9 +62,21 @@ fn main() {
                             Result::Ok(json!([
                                 {
                                     "label": "{}",
-                                    "insertText": "{$0}",
                                     "insertTextFormat": 2,
                                     "insertTextMode": 2,
+                                    "textEdit": {
+                                        "range": {
+                                            "start": {
+                                                "line": line,
+                                                "character": character - 1,
+                                            },
+                                            "end": {
+                                                "line": line,
+                                                "character": character,
+                                            }
+                                        },
+                                        "newText": "{$0}",
+                                    },
                                 },
                                 {
                                     "label": "{}_",
