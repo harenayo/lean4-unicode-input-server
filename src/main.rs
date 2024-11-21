@@ -44,7 +44,7 @@ fn main() {
             .unwrap()
             .into_iter()
             .map(|(label, text)| CompletionItem {
-                label,
+                label: format!("\\{label}"),
                 kind: CompletionItemKind::Snippet,
                 insert_text_format: InsertTextFormat::Snippet,
                 insert_text_mode: InsertTextMode::AdjustIndentation,
