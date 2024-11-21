@@ -6,8 +6,19 @@ use {
         Response,
         ResponseError,
     },
-    serde_json::json,
-    std::collections::HashMap,
+    serde::{
+        Deserialize,
+        Serialize,
+    },
+    serde_json::{
+        from_str,
+        from_value,
+        to_value,
+    },
+    std::{
+        borrow::Cow,
+        collections::HashMap,
+    },
 };
 
 fn main() {
@@ -16,195 +27,191 @@ fn main() {
     connection
         .initialize_finish(
             connection.initialize_start().unwrap().0,
-            json!({
-                "capabilities": {
-                    "positionEncoding": "utf-8",
-                    "textDocumentSync": 1,
-                    "completionProvider": {
-                        "triggerCharacters": ["\\"],
+            to_value(InitializeResult {
+                capabilities: ServerCapabilities {
+                    completion_provider: CompletionOptions {
+                        trigger_characters: ["\\"],
                     },
                 },
-                "serverInfo": {
-                    "name": env!("CARGO_PKG_NAME"),
-                    "version": env!("CARGO_PKG_VERSION"),
+                server_info: ServerInfo {
+                    name: env!("CARGO_PKG_NAME"),
+                    version: env!("CARGO_PKG_VERSION"),
                 },
-            }),
+            })
+            .unwrap(),
         )
         .unwrap();
 
-    let mut files: HashMap<_, Vec<String>> = HashMap::new();
+    let mut completion = CompletionList {
+        is_incomplete: false,
+        item_defaults: CompletionDefaultItems {
+            edit_range: Range::default(),
+            insert_text_format: InsertTextFormat::Snippet,
+            insert_text_mode: InsertTextMode::AdjustIndentation,
+        },
+        items: from_str::<Abbreviations>(include_str!(env!("ABBREVIATIONS_JSON")))
+            .unwrap()
+            .into_iter()
+            .map(|(label, text)| CompletionItem {
+                label,
+                kind: CompletionItemKind::Snippet,
+                text_edit_text: match text.contains("$CURSOR") {
+                    true => Cow::Owned(text.replace("$CURSOR", "$0")),
+                    false => Cow::Borrowed(text),
+                },
+            })
+            .collect(),
+    };
 
     for message in &connection.receiver {
-        match message {
-            Message::Request(request) => {
-                if connection.handle_shutdown(&request).unwrap() {
-                    break;
-                }
+        if let Message::Request(request) = message {
+            if connection.handle_shutdown(&request).unwrap() {
+                break;
+            }
 
-                let (result, error) = match match request.method.as_str() {
-                    "textDocument/completion" => match (|| {
-                        let params = request.params.as_object()?;
-                        let position = params.get("position")?.as_object()?;
+            let (result, error) = match match request.method.as_str() {
+                "textDocument/completion" => (|| {
+                    let params = from_value::<CompletionParams>(request.params)?;
 
-                        Option::Some((
-                            params
-                                .get("textDocument")?
-                                .as_object()?
-                                .get("uri")?
-                                .as_str()?,
-                            position.get("line")?.as_u64()?,
-                            position.get("character")?.as_u64()?,
-                        ))
-                    })() {
-                        Option::Some((uri, line, character)) => {
-                            let _str = &files[uri][line as usize][character as usize..];
+                    let mut range = Range {
+                        start: params.position,
+                        end: params.position,
+                    };
 
-                            Result::Ok(json!([
-                                {
-                                    "label": "{}",
-                                    "insertTextFormat": 2,
-                                    "insertTextMode": 2,
-                                    "textEdit": {
-                                        "range": {
-                                            "start": {
-                                                "line": line,
-                                                "character": character - 1,
-                                            },
-                                            "end": {
-                                                "line": line,
-                                                "character": character,
-                                            }
-                                        },
-                                        "newText": "{$0}",
-                                    },
-                                },
-                                {
-                                    "label": "{}_",
-                                    "insertText": "{$0}_",
-                                    "insertTextFormat": 2,
-                                    "insertTextMode": 1,
-                                },
-                                {
-                                    "label": "{{}}",
-                                    "insertText": "⦃$1⦄",
-                                    "insertTextFormat": 2,
-                                    "insertTextMode": 2,
-                                },
-                                {
-                                    "label": "\\",
-                                    "insertText": "\\",
-                                    "insertTextFormat": 1,
-                                },
-                                {
-                                    "label": "a",
-                                    "kind": 1,
-                                    "insertText": "α",
-                                    "insertTextFormat": 1,
-                                },
-                                {
-                                    "label": "b",
-                                    "kind": 6,
-                                    "insertText": "β",
-                                    "insertTextFormat": 1,
-                                },
-                                {
-                                    "label": "c",
-                                    "kind": 15,
-                                    "insertText": "χ",
-                                    "insertTextFormat": 1,
-                                },
-                            ]))
-                        },
-                        Option::None => Result::Err(ResponseError {
-                            code: ErrorCode::InvalidParams as i32,
-                            message: "parameters are invalid".to_owned(),
-                            data: Option::None,
-                        }),
-                    },
-                    _ => Result::Err(ResponseError {
-                        code: ErrorCode::MethodNotFound as i32,
-                        message: "a method is not found".to_owned(),
-                        data: Option::None,
-                    }),
-                } {
-                    Result::Ok(result) => (Option::Some(result), Option::None),
-                    Result::Err(error) => (Option::None, Option::Some(error)),
-                };
+                    range.start.character -= 1;
+                    completion.item_defaults.edit_range = range;
+                    to_value(&completion)
+                })()
+                .map_err(|_| ResponseError {
+                    code: ErrorCode::InvalidParams as i32,
+                    message: "parameters are invalid".to_owned(),
+                    data: Option::None,
+                }),
+                _ => Result::Err(ResponseError {
+                    code: ErrorCode::MethodNotFound as i32,
+                    message: "a method is not found".to_owned(),
+                    data: Option::None,
+                }),
+            } {
+                Result::Ok(result) => (Option::Some(result), Option::None),
+                Result::Err(error) => (Option::None, Option::Some(error)),
+            };
 
-                connection
-                    .sender
-                    .send(Message::Response(Response {
-                        id: request.id,
-                        result,
-                        error,
-                    }))
-                    .unwrap();
-            },
-            Message::Notification(notification) => (|| {
-                let (uri, text) = match notification.method.as_str() {
-                    "textDocument/didOpen" => {
-                        let document = notification
-                            .params
-                            .as_object()?
-                            .get("textDocument")?
-                            .as_object()?;
-
-                        Option::Some((
-                            document.get("uri")?.as_str()?,
-                            Option::Some(document.get("text")?.as_str()?),
-                        ))
-                    },
-                    "textDocument/didChange" => {
-                        let params = notification.params.as_object()?;
-
-                        Option::Some((
-                            params
-                                .get("textDocument")?
-                                .as_object()?
-                                .get("uri")?
-                                .as_str()?,
-                            Option::Some(
-                                params
-                                    .get("contentChanges")?
-                                    .as_array()?
-                                    .last()?
-                                    .as_object()?
-                                    .get("text")?
-                                    .as_str()?,
-                            ),
-                        ))
-                    },
-                    "textDocument/didClose" => Option::Some((
-                        notification
-                            .params
-                            .as_object()?
-                            .get("textDocument")?
-                            .as_object()?
-                            .get("uri")?
-                            .as_str()?,
-                        Option::None,
-                    )),
-                    _ => Option::None,
-                }?;
-
-                match text {
-                    Option::Some(text) => {
-                        files.insert(
-                            uri.to_owned(),
-                            text.lines().map(str::to_owned).collect::<Vec<_>>(),
-                        );
-                    },
-                    Option::None => {
-                        files.remove(uri);
-                    },
-                }
-
-                Option::None
-            })()
-            .unwrap_or_default(),
-            _ => (),
+            connection
+                .sender
+                .send(Message::Response(Response {
+                    id: request.id,
+                    result,
+                    error,
+                }))
+                .unwrap();
         }
     }
 
     threads.join().unwrap();
 }
+
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+struct Position {
+    line: u32,
+    character: u32,
+}
+
+#[derive(Default, Serialize)]
+struct Range {
+    start: Position,
+    end: Position,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InitializeResult {
+    capabilities: ServerCapabilities,
+    server_info: ServerInfo,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerCapabilities {
+    completion_provider: CompletionOptions,
+}
+
+#[derive(Serialize)]
+struct ServerInfo {
+    name: &'static str,
+    version: &'static str,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionOptions {
+    trigger_characters: [&'static str; 1],
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionParams {
+    position: Position,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionList {
+    is_incomplete: bool,
+    item_defaults: CompletionDefaultItems,
+    items: Vec<CompletionItem>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionDefaultItems {
+    edit_range: Range,
+    insert_text_format: InsertTextFormat,
+    insert_text_mode: InsertTextMode,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(into = "u32")]
+enum InsertTextFormat {
+    Snippet = 2,
+}
+
+impl From<InsertTextFormat> for u32 {
+    fn from(value: InsertTextFormat) -> Self {
+        value as Self
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(into = "u32")]
+enum InsertTextMode {
+    AdjustIndentation = 2,
+}
+
+impl From<InsertTextMode> for u32 {
+    fn from(value: InsertTextMode) -> Self {
+        value as Self
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompletionItem {
+    label: &'static str,
+    kind: CompletionItemKind,
+    text_edit_text: Cow<'static, str>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(into = "u32")]
+enum CompletionItemKind {
+    Snippet = 15,
+}
+
+impl From<CompletionItemKind> for u32 {
+    fn from(value: CompletionItemKind) -> Self {
+        value as Self
+    }
+}
+
+type Abbreviations = HashMap<&'static str, &'static str>;
