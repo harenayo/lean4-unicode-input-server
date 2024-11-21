@@ -39,26 +39,24 @@ fn main() {
         )
         .unwrap();
 
-    let mut completion = CompletionList {
-        is_incomplete: false,
-        item_defaults: CompletionDefaultItems {
-            edit_range: Range::default(),
-            insert_text_format: InsertTextFormat::Snippet,
-            insert_text_mode: InsertTextMode::AdjustIndentation,
-        },
-        items: from_str::<Abbreviations>(include_str!(env!("ABBREVIATIONS_JSON")))
+    let mut completion: Vec<_> =
+        from_str::<Abbreviations>(include_str!(env!("ABBREVIATIONS_JSON")))
             .unwrap()
             .into_iter()
             .map(|(label, text)| CompletionItem {
                 label,
                 kind: CompletionItemKind::Snippet,
-                text_edit_text: match text.contains("$CURSOR") {
-                    true => text.replace("$CURSOR", "$0"),
-                    false => text,
+                insert_text_format: InsertTextFormat::Snippet,
+                insert_text_mode: InsertTextMode::AdjustIndentation,
+                text_edit: TextEdit {
+                    range: Range::default(),
+                    new_text: match text.contains("$CURSOR") {
+                        true => text.replace("$CURSOR", "$0"),
+                        false => text,
+                    },
                 },
             })
-            .collect(),
-    };
+            .collect();
 
     for message in &connection.receiver {
         if let Message::Request(request) = message {
@@ -76,7 +74,11 @@ fn main() {
                     };
 
                     range.start.character -= 1;
-                    completion.item_defaults.edit_range = range;
+
+                    for item in &mut completion {
+                        item.text_edit.range = range;
+                    }
+
                     to_value(&completion)
                 })()
                 .map_err(|_| ResponseError {
@@ -114,10 +116,17 @@ struct Position {
     character: u32,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Clone, Copy, Default, Serialize)]
 struct Range {
     start: Position,
     end: Position,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TextEdit {
+    range: Range,
+    new_text: String,
 }
 
 #[derive(Serialize)]
@@ -151,22 +160,6 @@ struct CompletionParams {
     position: Position,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CompletionList {
-    is_incomplete: bool,
-    item_defaults: CompletionDefaultItems,
-    items: Vec<CompletionItem>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CompletionDefaultItems {
-    edit_range: Range,
-    insert_text_format: InsertTextFormat,
-    insert_text_mode: InsertTextMode,
-}
-
 #[derive(Clone, Serialize)]
 #[serde(into = "u32")]
 enum InsertTextFormat {
@@ -196,7 +189,9 @@ impl From<InsertTextMode> for u32 {
 struct CompletionItem {
     label: String,
     kind: CompletionItemKind,
-    text_edit_text: String,
+    insert_text_format: InsertTextFormat,
+    insert_text_mode: InsertTextMode,
+    text_edit: TextEdit,
 }
 
 #[derive(Clone, Serialize)]
