@@ -2,14 +2,16 @@
 name = "lean4-unicode-input-server"
 version = "0.1.0"
 authors = ["Harenayo"]
-edition = "2021"
+edition = "2024"
 description = "A language server providing completion of Lean 4's unicode symbols"
 readme = "README.md"
 repository = "https://github.com/harenayo/lean4-unicode-input-server"
 license = "MIT"
 
 [dependencies]
-indexmap = { version = "2.6.0", features = ["serde"] }
-lsp-server = "0.7.7"
-serde = { version = "1.0.215", features = ["derive"] }
-serde_json = "1.0.133"
+indexmap = { version = "2.12.0", features = ["serde"] }
+lsp-server = "0.7.9"
+lsp-types = "0.97.0"
+rancor = "0.1.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
