@@ -28,8 +28,8 @@ use {
     },
     ::serde_json::{
         de::from_str,
-        json,
         value::{
+            Value,
             from_value,
             to_value,
         },
@@ -46,7 +46,7 @@ fn main() -> Result<(), BoxedError> {
             to_value(InitializeResult {
                 capabilities: ServerCapabilities {
                     completion_provider: Option::Some(CompletionOptions {
-                        trigger_characters: Option::Some(["\\".to_owned()].to_vec()),
+                        trigger_characters: Option::Some([r"\".to_owned()].to_vec()),
                         ..Default::default()
                     }),
                     ..Default::default()
@@ -61,7 +61,7 @@ fn main() -> Result<(), BoxedError> {
         .into_error()?;
 
     let mut completion: Vec<_> =
-        from_str::<IndexMap<String, String>>(include_str!(env!("ABBREVIATIONS_JSON")))
+        from_str::<IndexMap<String, String>>(include_str!("../abbreviations.json"))
             .into_error()?
             .into_iter()
             .map(|(label, text)| CompletionItem {
@@ -89,9 +89,9 @@ fn main() -> Result<(), BoxedError> {
             break;
         }
 
-        let (result, error) = match 'block: {
+        let result = 'result: {
             if request.method != "textDocument/completion" {
-                break 'block Result::Err(ResponseError {
+                break 'result Result::Err(ResponseError {
                     code: ErrorCode::MethodNotFound as i32,
                     message: format!("'{}' is not found", request.method),
                     data: Option::None,
@@ -101,13 +101,10 @@ fn main() -> Result<(), BoxedError> {
             let params = match from_value::<CompletionParams>(request.params) {
                 Result::Ok(params) => params,
                 Result::Err(error) => {
-                    break 'block Result::Err(ResponseError {
+                    break 'result Result::Err(ResponseError {
                         code: ErrorCode::InvalidParams as i32,
                         message: "parameters are invalid".to_owned(),
-                        data: Option::Some(json!({
-                            "params": request.params,
-                            "error": error.to_string(),
-                        })),
+                        data: Option::Some(Value::String(error.to_string())),
                     });
                 },
             };
@@ -116,7 +113,10 @@ fn main() -> Result<(), BoxedError> {
                 match params.context {
                     Option::Some(context)
                         if context.trigger_kind != CompletionTriggerKind::TRIGGER_CHARACTER
-                            || context.trigger_character.is_some_and(|s| s == "\\") =>
+                            || context
+                                .trigger_character
+                                .as_ref()
+                                .is_some_and(|s| s == r"\") =>
                     {
                         let position = params.text_document_position.position;
 
@@ -141,7 +141,9 @@ fn main() -> Result<(), BoxedError> {
                 }
                 .into_error()?,
             )
-        } {
+        };
+
+        let (result, error) = match result {
             Result::Ok(value) => (Option::Some(value), Option::None),
             Result::Err(error) => (Option::None, Option::Some(error)),
         };
